@@ -14,7 +14,7 @@ bot = Bot(token=BOT_TOKEN)
 START_HOUR = 9
 END_HOUR = 18
 WORKDAYS = range(0, 5)  # Monday=0, ..., Friday=4
-REMINDER_INTERVAL = 20 * 60  # 20 minutes
+REMINDER_INTERVAL = 60  # 20 minutes
 
 # --- FastAPI setup ---
 app = FastAPI()
@@ -49,3 +49,4 @@ async def startup_event():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
