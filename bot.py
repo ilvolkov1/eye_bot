@@ -3,7 +3,7 @@ import os
 import random
 from contextlib import asynccontextmanager
 from datetime import datetime, time
-
+import pytz
 import uvicorn
 from fastapi import FastAPI
 from telegram import Bot
@@ -18,10 +18,10 @@ if not BOT_TOKEN or not CHAT_ID:
 bot = Bot(token=BOT_TOKEN)
 
 # --- Eye Rest Reminder Settings ---
-REMINDER_INTERVAL = 20 * 60  # 20 minutes in seconds
+REMINDER_INTERVAL = 60  # 20 minutes in seconds
 WORKDAYS = range(5)  # 0–4 = Monday to Friday
 START_HOUR = 9  # 9:00 AM
-END_HOUR = 18  # 6:00 PM (18:00)
+END_HOUR = 23  # 6:00 PM (18:00)
 MESSAGES = [
     "20-20-20! Look far, rest easy!",
     "Eyes tired? 20 feet, 20 seconds — go!",
@@ -34,7 +34,7 @@ MESSAGES = [
 async def send_eye_reminders():
     print("Eye rest reminder task started...")
     while True:
-        now = datetime.now()
+        now = datetime.now(tz=pytz.timezone("Asia/Nicosia"))
         current_time = now.time()
         weekday_name = now.strftime("%A")
         is_workday = now.weekday() in WORKDAYS
