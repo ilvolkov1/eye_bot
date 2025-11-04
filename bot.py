@@ -1,3 +1,4 @@
+# bot.py
 import asyncio
 import itertools
 import os
@@ -7,22 +8,28 @@ from datetime import datetime, time
 import pytz
 import uvicorn
 from fastapi import FastAPI
-from telegram import Bot
+from telegram import Bot, ReplyKeyboardMarkup, Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+)
 
-# --- Config ---
+# ----------------------------------------------------------------------
+# 1. CONFIG
+# ----------------------------------------------------------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN must be set in Render env")
 
-if not BOT_TOKEN or not CHAT_ID:
-    raise ValueError("Set BOT_TOKEN and CHAT_ID in Render environment variables!")
+# ----------------------------------------------------------------------
+# 2. REMINDER SETTINGS
+# ----------------------------------------------------------------------
+TZ = pytz.timezone("Asia/Nicosia")
+REMINDER_INTERVAL = 20 * 60  # 20 min
+WORKDAYS = range(5)  # Mon-Fri
+START_HOUR, END_HOUR = 9, 18
 
-bot = Bot(token=BOT_TOKEN)
-
-# --- Eye Rest Reminder Settings ---
-REMINDER_INTERVAL = 20 * 60  # 20 minutes in seconds
-WORKDAYS = range(5)  # 0–4 = Monday to Friday
-START_HOUR = 9  # 9:00 AM
-END_HOUR = 18  # 6:00 PM (18:00)
 MESSAGES = [
     "20-20-20 rule! Look 20 ft for 20 sec 👀⏱️",
     "Blink now and relax your eyes 😊",
@@ -35,65 +42,101 @@ MESSAGES = [
     "Remember to blink more and relax 😴👁️",
     "Hydrate and rest your eyes 💧👁️",
 ]
+msg_cycle = itertools.cycle(MESSAGES)
 
-message_cycle = itertools.cycle(MESSAGES)
+# ----------------------------------------------------------------------
+# 3. IN-MEMORY SUBSCRIBERS
+# ----------------------------------------------------------------------
+subscribers: set[int] = set()  # user_id → int
 
 
-# --- Async Reminder Loop ---
-async def send_eye_reminders():
-    print("Eye rest reminder task started...")
+# ----------------------------------------------------------------------
+# 4. BOT COMMANDS
+# ----------------------------------------------------------------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    subscribers.add(user.id)
+
+    await update.message.reply_text(
+        "Eye-rest reminders ON!\n"
+        "Every 20 min (Mon-Fri 09:00-18:00, Cyprus time)\n\n"
+        "Send /stop to unsubscribe.",
+        reply_markup=ReplyKeyboardMarkup([["/stop"]], resize_keyboard=True),
+    )
+
+
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    subscribers.discard(user.id)
+
+    await update.message.reply_text(
+        "Reminders stopped.\nSend /start to turn them back on.",
+        reply_markup=ReplyKeyboardMarkup([["/start"]], resize_keyboard=True),
+    )
+
+
+# ----------------------------------------------------------------------
+# 5. REMINDER LOOP
+# ----------------------------------------------------------------------
+async def reminder_loop(bot: Bot):
     while True:
-        now = datetime.now(tz=pytz.timezone("Asia/Nicosia"))
-        current_time = now.time()
-        is_workday = now.weekday() in WORKDAYS
-        is_work_hours = time(START_HOUR) <= current_time <= time(END_HOUR)
+        now = datetime.now(TZ)
+        if now.weekday() in WORKDAYS and time(START_HOUR) <= now.time() <= time(
+            END_HOUR
+        ):
+            text = next(msg_cycle)
+            for uid in list(subscribers):  # copy to avoid mutation
+                try:
+                    await bot.send_message(chat_id=uid, text=text)
+                except Exception as e:  # blocked / deleted user
+                    print(f"Failed to send to {uid}: {e}")
+                    subscribers.discard(uid)
 
-        if is_workday and is_work_hours:
-            try:
-                await bot.send_message(
-                    chat_id=CHAT_ID, text=next(message_cycle), parse_mode="Markdown"
-                )
-                print(f"[{now.strftime('%H:%M')}] Eye rest reminder sent!")
-            except Exception as e:
-                print(f"Error sending reminder: {e}")
-
-        # Wait until next 20-minute mark
         await asyncio.sleep(REMINDER_INTERVAL)
 
 
-# --- FastAPI with Lifespan ---
+# ----------------------------------------------------------------------
+# 6. FASTAPI + LIFESPAN
+# ----------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start reminder task
-    task = asyncio.create_task(send_eye_reminders())
-    print("Bot is running. Eye reminders every 20 mins during work hours.")
+    # ---- bot polling -------------------------------------------------
+    tg_app = Application.builder().token(BOT_TOKEN).build()
+    tg_app.add_handler(CommandHandler("start", start))
+    tg_app.add_handler(CommandHandler("stop", stop))
+
+    await tg_app.initialize()
+    await tg_app.start()
+    await tg_app.updater.start_polling()
+
+    # ---- reminder task -----------------------------------------------
+    asyncio.create_task(reminder_loop(tg_app.bot))
+
+    print("Bot + reminders running")
     yield
-    # Cleanup on shutdown
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+
+    # ---- shutdown ----------------------------------------------------
+    await tg_app.updater.stop()
+    await tg_app.stop()
+    await tg_app.shutdown()
 
 
 app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/")
-def health():
+@app.head("/")
+async def health():
     return {
         "status": "alive",
-        "reminders": "Every 20 min (Mon–Fri, 9AM–6PM)",
-        "next": "Check Telegram!",
+        "subscribers": len(subscribers),
+        "next_reminder": "≤20 min (Mon-Fri 09:00-18:00)",
     }
 
 
-@app.head("/")
-async def head_health():
-    return {"status": "ok"}
-
-
-# --- Run ---
+# ----------------------------------------------------------------------
+# 7. ENTRYPOINT
+# ----------------------------------------------------------------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.getenv("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
