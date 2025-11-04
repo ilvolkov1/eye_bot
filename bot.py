@@ -11,10 +11,10 @@ CHAT_ID = os.getenv("CHAT_ID")
 bot = Bot(token=BOT_TOKEN)
 
 # --- Reminder settings ---
-START_HOUR = 9
-END_HOUR = 18
-WORKDAYS = range(0, 5)  # Monday=0, ..., Friday=4
-REMINDER_INTERVAL = 60  # 20 minutes
+START_HOUR = 0    # For testing, allow all hours
+END_HOUR = 23
+WORKDAYS = range(0, 7)  # All days for testing
+REMINDER_INTERVAL = 60  # 1 minute
 
 # --- FastAPI setup ---
 app = FastAPI()
@@ -29,18 +29,18 @@ async def send_reminders():
         now = datetime.now()
         if now.weekday() in WORKDAYS and time(START_HOUR) <= now.time() <= time(END_HOUR):
             try:
-                # Wrap synchronous send_message in asyncio.to_thread
+                # Properly wrap synchronous send_message
                 await asyncio.to_thread(
                     bot.send_message,
                     chat_id=CHAT_ID,
-                    text="👀 Time to rest your eyes for a minute!"
+                    text=f"👀 Test reminder at {now.strftime('%H:%M:%S')}"
                 )
                 print(f"[{now}] Reminder sent successfully.")
             except Exception as e:
                 print(f"[{now}] Error sending message: {e}")
         await asyncio.sleep(REMINDER_INTERVAL)
 
-# --- Launch reminder task on startup ---
+# --- Start reminder task on FastAPI startup ---
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(send_reminders())
@@ -49,4 +49,3 @@ async def startup_event():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-
