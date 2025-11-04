@@ -1,11 +1,12 @@
-import os
 import asyncio
-from datetime import datetime, time
-from telegram import Bot
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
-import uvicorn
+import os
 import random
+from contextlib import asynccontextmanager
+from datetime import datetime, time
+
+import uvicorn
+from fastapi import FastAPI
+from telegram import Bot
 
 # --- Config ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -18,9 +19,9 @@ bot = Bot(token=BOT_TOKEN)
 
 # --- Eye Rest Reminder Settings ---
 REMINDER_INTERVAL = 20 * 60  # 20 minutes in seconds
-WORKDAYS = range(5)          # 0–4 = Monday to Friday
-START_HOUR = 9               # 9:00 AM
-END_HOUR = 18                # 6:00 PM (18:00)
+WORKDAYS = range(5)  # 0–4 = Monday to Friday
+START_HOUR = 9  # 9:00 AM
+END_HOUR = 18  # 6:00 PM (18:00)
 MESSAGES = [
     "20-20-20! Look far, rest easy!",
     "Eyes tired? 20 feet, 20 seconds — go!",
@@ -35,15 +36,17 @@ async def send_eye_reminders():
     while True:
         now = datetime.now()
         current_time = now.time()
+        weekday_name = now.strftime("%A")
         is_workday = now.weekday() in WORKDAYS
         is_work_hours = time(START_HOUR) <= current_time <= time(END_HOUR)
 
         if is_workday and is_work_hours:
             try:
+                base_msg = random.choice(MESSAGES)
+                extra = f"\n\n*Today:* {weekday_name}\n*Work ends at:* {current_time}"
+                full_msg = base_msg + extra
                 await bot.send_message(
-                    chat_id=CHAT_ID,
-                    text = random.choice(MESSAGES),
-                    parse_mode="Markdown"
+                    chat_id=CHAT_ID, text=full_msg, parse_mode="Markdown"
                 )
                 print(f"[{now.strftime('%H:%M')}] Eye rest reminder sent!")
             except Exception as e:
@@ -51,6 +54,7 @@ async def send_eye_reminders():
 
         # Wait until next 20-minute mark
         await asyncio.sleep(REMINDER_INTERVAL)
+
 
 # --- FastAPI with Lifespan ---
 @asynccontextmanager
@@ -66,22 +70,25 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
 
+
 app = FastAPI(lifespan=lifespan)
+
 
 @app.get("/")
 def health():
     return {
         "status": "alive",
         "reminders": "Every 20 min (Mon–Fri, 9AM–6PM)",
-        "next": "Check Telegram!"
+        "next": "Check Telegram!",
     }
+
 
 @app.head("/")
 async def head_health():
     return {"status": "ok"}
 
+
 # --- Run ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-
