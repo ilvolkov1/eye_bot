@@ -136,9 +136,27 @@ async def health():
     }
 
 
-# ----------------------------------------------------------------------
-# 7. ENTRYPOINT
-# ----------------------------------------------------------------------
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    tg_app = Application.builder().token(BOT_TOKEN).build()
+    tg_app.add_handler(CommandHandler("start", start))
+    tg_app.add_handler(CommandHandler("stop", stop))
+
+    await tg_app.initialize()
+    await tg_app.start()
+    await tg_app.updater.start_polling(
+        drop_pending_updates=True,  # ← Skip old messages
+    )
+
+    # Reminder task
+    asyncio.create_task(reminder_loop(tg_app.bot))
+
+    print("Bot started - polling active")
+    yield
+
+    # Shutdown
+    print("Shutting down bot...")
+    await tg_app.updater.stop()
+    await tg_app.stop()
+    await tg_app.shutdown()
