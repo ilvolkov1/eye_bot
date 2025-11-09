@@ -81,8 +81,10 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reminder_loop(bot: Bot):
     while True:
         now = datetime.now(TZ)
-        if now.weekday() in WORKDAYS and time(START_HOUR) <= now.time() <= time(
-            END_HOUR
+        if (
+            now.weekday() in WORKDAYS
+            and time(START_HOUR) <= now.time() <= time(END_HOUR)
+            and not (time(13, 0) <= now.time() < time(14, 0))
         ):
             text = next(msg_cycle)
             for uid in list(subscribers):  # copy to avoid mutation
