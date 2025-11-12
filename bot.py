@@ -114,6 +114,7 @@ async def lifespan(app: FastAPI):
     await tg_app.start()
     await tg_app.updater.start_polling(
         drop_pending_updates=True,
+        allowed_updates=["message"],  # Only handle messages
     )
 
     # ---- reminder task -----------------------------------------------
@@ -134,8 +135,15 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/")
 @app.head("/")
 async def health():
+    # Get all users from database
+    try:
+        users_data = await db.get_all_users()
+    except Exception as e:
+        users_data = f"Database error: {e}"
+
     return {
         "status": "alive",
         "subscribers": len(subscribers),
         "next_reminder": "≤20 min (Mon-Fri 09:00-18:00)",
+        "users_in_db": users_data,
     }

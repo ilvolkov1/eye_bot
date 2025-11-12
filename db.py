@@ -66,3 +66,24 @@ async def fetch_active_users() -> set[int]:
             return {int(r[0]) for r in rows}
     finally:
         await conn.close()
+
+
+async def get_all_users() -> list[dict]:
+    conn = await psycopg.AsyncConnection.connect(DATABASE_URL)
+    try:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "select user_id, active, created_at, updated_at from subscribers order by created_at desc"
+            )
+            rows = await cur.fetchall()
+            return [
+                {
+                    "user_id": int(row[0]),
+                    "active": row[1],
+                    "created_at": row[2].isoformat() if row[2] else None,
+                    "updated_at": row[3].isoformat() if row[3] else None,
+                }
+                for row in rows
+            ]
+    finally:
+        await conn.close()
