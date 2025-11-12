@@ -6,14 +6,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime, time
 
 import pytz
-import uvicorn
 from fastapi import FastAPI
 from telegram import Bot, ReplyKeyboardMarkup, Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-)
+from telegram.ext import Application, CommandHandler, ContextTypes
+
+import db
 
 # ----------------------------------------------------------------------
 # 1. CONFIG
@@ -56,6 +53,7 @@ subscribers: set[int] = set()  # user_id → int
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     subscribers.add(user.id)
+    await db.add_or_activate_user(user.id)
 
     await update.message.reply_text(
         "Eye-rest reminders ON!\n"
@@ -68,6 +66,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     subscribers.discard(user.id)
+    await db.deactivate_user(user.id)
 
     await update.message.reply_text(
         "Reminders stopped.\nSend /start to turn them back on.",
@@ -92,6 +91,7 @@ async def reminder_loop(bot: Bot):
                     await bot.send_message(chat_id=uid, text=text)
                 except Exception as e:  # blocked / deleted user
                     print(f"Failed to send to {uid}: {e}")
+                    await db.deactivate_user(uid)
                     subscribers.discard(uid)
 
         await asyncio.sleep(REMINDER_INTERVAL)
@@ -106,10 +106,15 @@ async def lifespan(app: FastAPI):
     tg_app = Application.builder().token(BOT_TOKEN).build()
     tg_app.add_handler(CommandHandler("start", start))
     tg_app.add_handler(CommandHandler("stop", stop))
+    await db.init_db()
+    existing = await db.fetch_active_users()
+    subscribers.update(existing)
 
     await tg_app.initialize()
     await tg_app.start()
-    await tg_app.updater.start_polling()
+    await tg_app.updater.start_polling(
+        drop_pending_updates=True,
+    )
 
     # ---- reminder task -----------------------------------------------
     asyncio.create_task(reminder_loop(tg_app.bot))
@@ -134,29 +139,3 @@ async def health():
         "subscribers": len(subscribers),
         "next_reminder": "≤20 min (Mon-Fri 09:00-18:00)",
     }
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    tg_app = Application.builder().token(BOT_TOKEN).build()
-    tg_app.add_handler(CommandHandler("start", start))
-    tg_app.add_handler(CommandHandler("stop", stop))
-
-    await tg_app.initialize()
-    await tg_app.start()
-    await tg_app.updater.start_polling(
-        drop_pending_updates=True,  # ← Skip old messages
-    )
-
-    # Reminder task
-    asyncio.create_task(reminder_loop(tg_app.bot))
-
-    print("Bot started - polling active")
-    yield
-
-    # Shutdown
-    print("Shutting down bot...")
-    await tg_app.updater.stop()
-    await tg_app.stop()
-    await tg_app.shutdown()
